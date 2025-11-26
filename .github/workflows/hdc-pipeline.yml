@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-20.04
     needs: [ tests ]
     outputs:
-      branch: ${{steps.extract_branch.outputs.branch}}
+      branch: ${{ steps.extract_branch.outputs.branch }}
     steps:
       - name: Extract Branch Name
         id: extract_branch
@@ -107,7 +107,7 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: Build binary
-        run: poetry run pyinstaller -F --distpath ./app/bundled_app/linux --specpath ./app/build/linux --workpath ./app/build/linux --paths=./.venv/lib/python3.9/site-packages ./app/pilotcli.py -n ${{ github.sha }}
+        run: poetry run pyinstaller -F --distpath ./app/bundled_app/linux --specpath ./app/build/linux --workpath ./app/build/linux --paths=./.venv/lib/python3.10/site-packages ./app/pilotcli.py -n ${{ github.sha }}
 
       - name: Set version in env
         run: poetry run echo "TAG_VERSION=`poetry version --short`" >> $GITHUB_ENV
