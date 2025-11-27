@@ -111,7 +111,7 @@ jobs:
         run: poetry run pyinstaller -F --distpath ./app/bundled_app/linux --specpath ./app/build/linux --workpath ./app/build/linux --paths=./.venv/lib/python3.10/site-packages ./app/pilotcli.py -n ${{ github.sha }}
 
       - name: Set version in env
-        run: poetry run echo "TAG_VERSION=`poetry version --short`" >> $GITHUB_ENV
+        run: poetry run echo "TAG_VERSION=v`poetry version --short`" >> $GITHUB_ENV
 
       - name: Create Release
         id: create_release
@@ -119,8 +119,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         with:
-          tag_name: ${{ env.TAG_VERSION }}-${{ needs.extract-branch-name.outputs.branch }}
-          release_name: Release ${{ needs.extract-branch-name.outputs.branch }} ${{ env.TAG_VERSION }}
+          tag_name: ${{ env.TAG_VERSION }}
+          release_name: ${{ env.TAG_VERSION }}
           body: ${{ github.event.head_commit.message }}
           draft: false
           prerelease: false

@@ -1,6 +1,6 @@
-# command_line_tool_ctl
+# pilotcli
 
-[![Python](https://img.shields.io/badge/python-3.7-brightgreen.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.10-brightgreen.svg)](https://www.python.org/)
 
 ## About
 Command line tool that allows the user to execute data operations on the platform.
