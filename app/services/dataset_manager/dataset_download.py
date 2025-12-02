@@ -31,10 +31,8 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         self.dataset_code = dataset_code
         self.dataset_geid = dataset_geid
         self.session_id = UserConfig().session_id
-        self.hash_code = ''
         self.version = ''
         self.download_url = ''
-        self.default_filename = ''
 
     @require_valid_token()
     def pre_dataset_version_download(self):
@@ -75,8 +73,8 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         return response.json()
 
     @require_valid_token()
-    def download_status(self) -> EFileStatus:
-        url = AppConfig.Connections.url_download_core + f'v1/download/status/{self.hash_code}'
+    def download_status(self, hash_code: str) -> EFileStatus:
+        url = AppConfig.Connections.url_download_core + f'v1/download/status/{hash_code}'
         try:
             response = requests.get(url)
             response.raise_for_status()
@@ -85,16 +83,16 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
             SrvErrorHandler.default_handle(response.content, True)
 
         res_json = response.json()
-        status = res_json.get('result').get('status')
+        status = res_json.get('result', {})['status']
         return EFileStatus(status)
 
-    def check_download_preparing_status(self) -> EFileStatus:
+    def check_download_preparing_status(self, hash_code: str) -> EFileStatus:
         max_retries = 15
         retries = 1
         backoff = 1
         start = time.monotonic()
         while retries < max_retries:
-            status = self.download_status()
+            status = self.download_status(hash_code)
             if status not in [EFileStatus.RUNNING, EFileStatus.WAITING]:
                 return status
 
@@ -118,12 +116,12 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         with requests.get(self.download_url, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
 
-            self.total_size = int(r.headers.get('Content-length'))
+            total_size = int(r.headers.get('Content-length'))
             with open(output_path, 'wb') as file, tqdm(
                 desc=f'Downloading {filename}',
                 unit='iB',
                 unit_scale=True,
-                total=self.total_size,
+                total=total_size,
                 unit_divisor=1024,
                 bar_format='{desc} |{bar:30} {percentage:3.0f}% {remaining}',
             ) as bar:
@@ -151,11 +149,9 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
     @require_valid_token()
     def download_dataset(self):
         pre_result = self.pre_dataset_download()
-        self.hash_code = pre_result.get('result').get('payload').get('hash_code')
-        self.download_url = AppConfig.Connections.url_download_core + f'v1/download/{self.hash_code}'
-        self.default_filename = pre_result.get('result').get('target_names')[0]
-        self.default_filename = self.default_filename.split('/')[-1]
-        status = self.check_download_preparing_status()
+        hash_code = pre_result.get('result', {}).get('payload', {})['hash_code']
+        self.download_url = AppConfig.Connections.url_download_core + f'v1/download/{hash_code}'
+        status = self.check_download_preparing_status(hash_code)
         SrvOutPutHandler.download_status(status)
         saved_filename = self.send_download_request()
         if os.path.isfile(saved_filename):
@@ -167,7 +163,7 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
     def download_dataset_version(self, version):
         self.version = version
         pre_result = self.pre_dataset_version_download()
-        self.download_url = pre_result.get('result').get('source')
+        self.download_url = pre_result.get('result', {})['source']
         saved_filename = self.send_download_request()
         if os.path.isfile(saved_filename):
             SrvOutPutHandler.download_success(saved_filename)
