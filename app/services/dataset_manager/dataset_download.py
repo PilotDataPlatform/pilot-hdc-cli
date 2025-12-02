@@ -4,10 +4,10 @@
 # Version 3.0 (the "License") available at https://www.gnu.org/licenses/agpl-3.0.en.html.
 # You may not use this file except in compliance with the License.
 
-import datetime
+import datetime as dt
 import os
 import time
-from urllib.parse import unquote
+from typing import Any
 
 import requests
 from tqdm import tqdm
@@ -31,10 +31,8 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         self.dataset_code = dataset_code
         self.dataset_geid = dataset_geid
         self.session_id = UserConfig().session_id
-        self.hash_code = ''
         self.version = ''
         self.download_url = ''
-        self.default_filename = ''
 
     @require_valid_token()
     def pre_dataset_version_download(self):
@@ -47,17 +45,17 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         payload = {'version': self.version}
         try:
             response = requests.get(url, headers=headers, params=payload)
-            res = response.json()
-            code = res.get('code')
-            if code == 404:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            response = e.response
+            if response.status_code == 404:
                 SrvErrorHandler.customized_handle(ECustomizedError.VERSION_NOT_EXIST, True, self.version)
             else:
-                return res
-        except Exception:
-            SrvErrorHandler.default_handle(response.content, True)
+                SrvErrorHandler.default_handle(response.content, True)
+        return response.json()
 
     @require_valid_token()
-    def pre_dataset_download(self):
+    def pre_dataset_download(self) -> dict[str, Any]:
         url = AppConfig.Connections.url_dataset_v2download + '/download/pre'
         headers = {
             'Authorization': 'Bearer ' + self.user.access_token,
@@ -67,65 +65,63 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
         payload = {'dataset_code': self.dataset_code, 'session_id': self.session_id, 'operator': self.user.username}
         try:
             response = requests.post(url, headers=headers, json=payload)
-            res = response.json()
-            return res
-        except Exception:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            response = e.response
             SrvErrorHandler.default_handle(response.content, True)
 
-    def generate_download_url(self):
-        if self.version:
-            download_url = AppConfig.Connections.url_dataset_v2download + f'/download/{self.hash_code}'
-        else:
-            download_url = AppConfig.Connections.url_download_core + f'v1/download/{self.hash_code}'
-        headers = {
-            'Authorization': 'Bearer ' + self.user.access_token,
-        }
-        res = requests.get(download_url, headers=headers)
-        res_json = res.json()
-        if self.version:
-            self.download_url = self.hash_code
-            default_filename = self.download_url.split('/')[-1].split('?')[0]
-            self.default_filename = unquote(default_filename)
-        else:
-            self.download_url = download_url
-            self.default_filename = res_json.get('error_msg').split('/')[-1].rstrip('.')
+        return response.json()
 
     @require_valid_token()
-    def download_status(self) -> EFileStatus:
-        url = AppConfig.Connections.url_download_core + f'v1/download/status/{self.hash_code}'
-        res = requests.get(url)
-        res_json = res.json()
-        if res_json.get('code') == 200:
-            status = res_json.get('result').get('status')
-            return EFileStatus(status)
-        else:
-            SrvErrorHandler.default_handle(res_json.get('error_msg'), True)
+    def download_status(self, hash_code: str) -> EFileStatus:
+        url = AppConfig.Connections.url_download_core + f'v1/download/status/{hash_code}'
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            response = e.response
+            SrvErrorHandler.default_handle(response.content, True)
 
-    def check_download_preparing_status(self) -> EFileStatus:
-        while True:
-            time.sleep(1)
-            status = self.download_status()
+        res_json = response.json()
+        status = res_json.get('result', {})['status']
+        return EFileStatus(status)
+
+    def check_download_preparing_status(self, hash_code: str) -> EFileStatus:
+        max_retries = 15
+        retries = 1
+        backoff = 1
+        start = time.monotonic()
+        while retries < max_retries:
+            status = self.download_status(hash_code)
             if status not in [EFileStatus.RUNNING, EFileStatus.WAITING]:
-                break
-        return status
+                return status
+
+            logger.info(f'Waiting for download preparation to complete. Try again in {backoff} second(s)...')
+            time.sleep(backoff)
+            retries += 1
+            backoff = min(backoff * 2, 5)
+
+        logger.error('Download preparation timed out.')
+        raise TimeoutError(f'Download preparation did not complete in {int(time.monotonic() - start)} seconds.')
 
     @require_valid_token()
     def send_download_request(self):
-        logger.info('start downloading...')
+        filename = f'{self.dataset_code}'
+        if self.version:
+            filename += f'_{self.version}'
+        filename += f'_{dt.datetime.now(tz=dt.timezone.utc).isoformat(sep="_")}.zip'
+        output_path = self.avoid_duplicate_file_name(self.output.rstrip('/') + '/' + filename)
+
+        logger.info('Start downloading...')
         with requests.get(self.download_url, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
-            # Since version zip file was created by our system, thus no need to consider filename contain '?'
-            if not self.default_filename:
-                filename = f'{self.dataset_code}_{self.version}_{str(datetime.datetime.now())}'
-            else:
-                filename = self.default_filename
-            output_path = self.avoid_duplicate_file_name(self.output.rstrip('/') + '/' + filename)
-            self.total_size = int(r.headers.get('Content-length'))
+
+            total_size = int(r.headers.get('Content-length'))
             with open(output_path, 'wb') as file, tqdm(
                 desc=f'Downloading {filename}',
                 unit='iB',
                 unit_scale=True,
-                total=self.total_size,
+                total=total_size,
                 unit_divisor=1024,
                 bar_format='{desc} |{bar:30} {percentage:3.0f}% {remaining}',
             ) as bar:
@@ -153,9 +149,9 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
     @require_valid_token()
     def download_dataset(self):
         pre_result = self.pre_dataset_download()
-        self.hash_code = pre_result.get('result').get('payload').get('hash_code')
-        self.generate_download_url()
-        status = self.check_download_preparing_status()
+        hash_code = pre_result.get('result', {}).get('payload', {})['hash_code']
+        self.download_url = AppConfig.Connections.url_download_core + f'v1/download/{hash_code}'
+        status = self.check_download_preparing_status(hash_code)
         SrvOutPutHandler.download_status(status)
         saved_filename = self.send_download_request()
         if os.path.isfile(saved_filename):
@@ -167,8 +163,7 @@ class SrvDatasetDownloadManager(metaclass=MetaService):
     def download_dataset_version(self, version):
         self.version = version
         pre_result = self.pre_dataset_version_download()
-        self.hash_code = pre_result.get('result').get('source')
-        self.generate_download_url()
+        self.download_url = pre_result.get('result', {})['source']
         saved_filename = self.send_download_request()
         if os.path.isfile(saved_filename):
             SrvOutPutHandler.download_success(saved_filename)

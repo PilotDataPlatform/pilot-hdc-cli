@@ -8,9 +8,8 @@
 class HelpPage:
     page = {
         'update': {
-            'version': '2.2.7',
-            '1': 'Removed ability to upload to core zone and to download from greenroom zone'
-            ' for more secure file handling workflow.',
+            'version': '2.2.8',
+            '1': 'Improve the dataset download logic to prevent cases when the dataset cannot be downloaded.',
         },
         'dataset': {
             'DATASET_DOWNLOAD': 'Download a dataset or a particular version of a dataset.',
