@@ -186,7 +186,7 @@ class SrvOutPutHandler(metaclass=MetaService):
 
     @staticmethod
     def dataset_current_version(version):
-        logger.succeed(f'Current dataset version: {version}')
+        logger.succeed(f'Looking for dataset version: {version}')
 
     @staticmethod
     def download_status(status):
