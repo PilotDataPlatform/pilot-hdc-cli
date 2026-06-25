@@ -49,6 +49,7 @@ repos:
     hooks:
       - id: flake8
         additional_dependencies: [
+          'setuptools==80.10.2',
           'pycodestyle==2.9.1',  # E,W
           'pyflakes==2.5.0',  # F
           'mccabe==0.7.0',  # C
